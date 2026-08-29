@@ -7,7 +7,7 @@ on:
         description: "Ladder Level (L0: 30 concepts [10/canon], L1: 150 concepts [50/canon], L2: Full 6,812 Corpus)"
         type: choice
         options: [L0, L1, L2]
-        default: L0
+        default: L1
       product:
         description: "Target Product"
         type: choice
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   prewarm:
-    name: prewarm-fleet (${{ inputs.level || 'L0' }} - ${{ inputs.product || 'all' }})
+    name: prewarm-fleet (${{ inputs.level || 'L1' }} - ${{ inputs.product || 'all' }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -46,19 +46,7 @@ jobs:
       - name: Install Dependencies
         run: cd pvt && pnpm install --frozen-lockfile
 
-      - name: Restore Previous Pre-Warmed Cache (if available)
-        env:
-          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
-        run: |
-          mkdir -p pvt/state
-          gh release download v-cache-latest -p "cache_${{ inputs.product }}.db.zst" --repo MAST3R/kalpa-output --dir pvt/state || echo "No prior cache found, starting fresh"
-          if [ -f "pvt/state/cache_${{ inputs.product }}.db.zst" ]; then
-            sudo apt-get update && sudo apt-get install -y zstd
-            zstd -d -f "pvt/state/cache_${{ inputs.product }}.db.zst" -o pvt/state/cache.db || true
-            echo "✅ Prior cache restored into pvt/state/cache.db"
-          fi
-
-      - name: Prewarm WebSocket Fleet (One Job, 81 Sockets, ∞ RPD)
+      - name: Prewarm WebSocket Fleet (Fresh Run, 135 Sockets, 63k TPM Clamp)
         run: |
           cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ inputs.product }} --level ${{ inputs.level }} --ws-only
         env:
