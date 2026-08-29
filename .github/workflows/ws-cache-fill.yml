@@ -50,6 +50,7 @@ jobs:
         run: |
           cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ inputs.product }} --level ${{ inputs.level }} --ws-only
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
