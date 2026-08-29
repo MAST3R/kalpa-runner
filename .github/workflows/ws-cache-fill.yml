@@ -1,4 +1,5 @@
 name: ws-cache-fill
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,29 +12,44 @@ on:
         description: concept limit per product (leave empty for full canon)
         type: string
         default: "10"
+
+permissions:
+  contents: read
+
 jobs:
   prewarm:
+    name: prewarm-${{ matrix.product }}
     strategy:
+      fail-fast: false
       matrix:
         product: ${{ inputs.product == 'all' && fromJSON('["atom", "scope", "tesla"]') || fromJSON(format('["{0}"]', inputs.product)) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Private Engine
+        uses: actions/checkout@v4
         with:
           repository: MAST3R/kalpa
           token: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
           path: pvt
-      - uses: pnpm/action-setup@v4
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pvt/pnpm-lock.yaml
-      - name: Install dependencies
-        run: cd pvt && pnpm install
-      - name: prewarm WS fleet (108 sockets)
+
+      - name: Install Dependencies
+        run: cd pvt && pnpm install --frozen-lockfile
+
+      - name: Prewarm WebSocket Fleet (108 sockets, ∞ RPD)
         run: |
           LIMIT_FLAG=""
           if [ -n "${{ inputs.limit }}" ]; then
@@ -68,21 +84,27 @@ jobs:
           GEMINI_API_KEY_25: ${{ secrets.GEMINI_API_KEY_25 }}
           GEMINI_API_KEY_26: ${{ secrets.GEMINI_API_KEY_26 }}
           GEMINI_API_KEY_27: ${{ secrets.GEMINI_API_KEY_27 }}
-      - run: cd pvt && npx tsx src/cli/index.ts pack --product ${{ matrix.product }} || echo "pack optional"
-      - name: push bundles to app repo + cache Release
+
+      - name: Compress and Sync Cache Asset
         env:
           GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
         run: |
           set -e
           sudo apt-get update && sudo apt-get install -y zstd
+          mkdir -p pvt/state
           zstd -19 -f pvt/state/cache.db -o pvt/state/cache_${{ matrix.product }}.db.zst || true
-          gh release upload v-cache-latest pvt/state/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --clobber || echo "no cache artifact yet"
-          git clone https://x-access-token:${{ secrets.PVT_CANON_ACCESS_TOKEN }}@github.com/MAST3R/kalpa-${{ matrix.product }}.git out || true
-          if [ -d "out" ]; then
-            mkdir -p out/assets
-            cp pvt/bundles.bin.* pvt/index.db pvt/manifest.json pvt/state/cache.db out/assets/ 2>/dev/null || echo "no bundles yet"
-            git -C out config user.name "kalpa-bot"
-            git -C out config user.email "bot@kalpa.local"
-            git -C out add -A && git -C out diff --cached --quiet || git -C out commit -m "chore(${{ matrix.product }}): cache update $(date -u)"
-            git -C out push || echo "nothing to push yet"
+          
+          # Upload release asset to MAST3R/kalpa-output
+          gh release upload v-cache-latest pvt/state/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --clobber || \
+          gh release create v-cache-latest pvt/state/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --title "Kalpa Pre-Warmed Cache DB" --notes "Latest pre-warmed cache db" || echo "Release created"
+          
+          # Commit chunked cache to output repo
+          git clone https://x-access-token:${{ secrets.PVT_CANON_ACCESS_TOKEN }}@github.com/MAST3R/kalpa-output.git out_repo || true
+          if [ -d "out_repo" ]; then
+            mkdir -p out_repo/chunks
+            split -b 30M pvt/state/cache_${{ matrix.product }}.db.zst out_repo/chunks/cache_${{ matrix.product }}.db.zst.part_ || true
+            git -C out_repo config user.name "kalpa-bot"
+            git -C out_repo config user.email "bot@kalpa.local"
+            git -C out_repo add -A && git -C out_repo diff --cached --quiet || git -C out_repo commit -m "chore(${{ matrix.product }}): update cache chunks"
+            git -C out_repo push || echo "nothing to push"
           fi
