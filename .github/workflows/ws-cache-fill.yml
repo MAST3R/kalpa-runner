@@ -78,6 +78,10 @@ jobs:
           GEMINI_API_KEY_26: ${{ secrets.GEMINI_API_KEY_26 }}
           GEMINI_API_KEY_27: ${{ secrets.GEMINI_API_KEY_27 }}
 
+      - name: Validate Prewarmed Cache Gates
+        run: |
+          cd pvt && KALPA_CACHE_DB=state/cache.db npx tsx scripts/validate-cache.ts
+
       - name: Compress and Sync Cache Asset
         env:
           GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
