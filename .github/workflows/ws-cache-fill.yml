@@ -3,28 +3,25 @@ name: ws-cache-fill
 on:
   workflow_dispatch:
     inputs:
+      level:
+        description: "Ladder Level (L0: 30 concepts [10/canon], L1: 150 concepts [50/canon], L2: Full 6,812 Corpus)"
+        type: choice
+        options: [L0, L1, L2]
+        default: L0
       product:
-        description: product to prewarm
+        description: "Target Product"
         type: choice
         options: [all, atom, scope, tesla]
         default: all
-      limit:
-        description: concept limit per product (leave empty for full canon)
-        type: string
-        default: "10"
 
 permissions:
   contents: read
 
 jobs:
   prewarm:
-    name: prewarm-${{ matrix.product }}
-    strategy:
-      fail-fast: false
-      matrix:
-        product: ${{ inputs.product == 'all' && fromJSON('["atom", "scope", "tesla"]') || fromJSON(format('["{0}"]', inputs.product)) }}
+    name: prewarm-fleet (${{ inputs.level || 'L0' }} - ${{ inputs.product || 'all' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Private Engine
@@ -49,13 +46,21 @@ jobs:
       - name: Install Dependencies
         run: cd pvt && pnpm install --frozen-lockfile
 
-      - name: Prewarm WebSocket Fleet (108 sockets, ∞ RPD)
+      - name: Restore Previous Pre-Warmed Cache (if available)
+        env:
+          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
         run: |
-          LIMIT_FLAG=""
-          if [ -n "${{ inputs.limit }}" ]; then
-            LIMIT_FLAG="--limit ${{ inputs.limit }}"
+          mkdir -p pvt/state
+          gh release download v-cache-latest -p "cache_${{ inputs.product }}.db.zst" --repo MAST3R/kalpa-output --dir pvt/state || echo "No prior cache found, starting fresh"
+          if [ -f "pvt/state/cache_${{ inputs.product }}.db.zst" ]; then
+            sudo apt-get update && sudo apt-get install -y zstd
+            zstd -d -f "pvt/state/cache_${{ inputs.product }}.db.zst" -o pvt/state/cache.db || true
+            echo "✅ Prior cache restored into pvt/state/cache.db"
           fi
-          cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ matrix.product }} $LIMIT_FLAG --ws-only
+
+      - name: Prewarm WebSocket Fleet (One Job, 81 Sockets, ∞ RPD)
+        run: |
+          cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ inputs.product }} --level ${{ inputs.level }} --ws-only
         env:
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
@@ -92,19 +97,19 @@ jobs:
           set -e
           sudo apt-get update && sudo apt-get install -y zstd
           mkdir -p pvt/state
-          zstd -19 -f pvt/state/cache.db -o pvt/state/cache_${{ matrix.product }}.db.zst || true
+          zstd -19 -f pvt/state/cache.db -o pvt/state/cache_${{ inputs.product }}.db.zst || true
           
           # Upload release asset to MAST3R/kalpa-output
-          gh release upload v-cache-latest pvt/state/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --clobber || \
-          gh release create v-cache-latest pvt/state/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --title "Kalpa Pre-Warmed Cache DB" --notes "Latest pre-warmed cache db" || echo "Release created"
+          gh release upload v-cache-latest pvt/state/cache_${{ inputs.product }}.db.zst --repo MAST3R/kalpa-output --clobber || \
+          gh release create v-cache-latest pvt/state/cache_${{ inputs.product }}.db.zst --repo MAST3R/kalpa-output --title "Kalpa Pre-Warmed Cache DB" --notes "Latest pre-warmed cache db" || echo "Release created"
           
           # Commit chunked cache to output repo
           git clone https://x-access-token:${{ secrets.PVT_CANON_ACCESS_TOKEN }}@github.com/MAST3R/kalpa-output.git out_repo || true
           if [ -d "out_repo" ]; then
             mkdir -p out_repo/chunks
-            split -b 30M pvt/state/cache_${{ matrix.product }}.db.zst out_repo/chunks/cache_${{ matrix.product }}.db.zst.part_ || true
+            split -b 30M pvt/state/cache_${{ inputs.product }}.db.zst out_repo/chunks/cache_${{ inputs.product }}.db.zst.part_ || true
             git -C out_repo config user.name "kalpa-bot"
             git -C out_repo config user.email "bot@kalpa.local"
-            git -C out_repo add -A && git -C out_repo diff --cached --quiet || git -C out_repo commit -m "chore(${{ matrix.product }}): update cache chunks"
+            git -C out_repo add -A && git -C out_repo diff --cached --quiet || git -C out_repo commit -m "chore(${{ inputs.product }}): ${{ inputs.level }} cache chunks update"
             git -C out_repo push || echo "nothing to push"
           fi
