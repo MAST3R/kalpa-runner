@@ -1,0 +1,75 @@
+name: ws-cache-fill
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: product to prewarm
+        type: choice
+        options: [all, atom, scope, tesla]
+        default: all
+jobs:
+  prewarm:
+    strategy:
+      matrix:
+        product: [atom, scope, tesla]
+    runs-on: ubuntu-latest
+    if: ${{ inputs.product == 'all' || inputs.product == matrix.product }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MAST3R/kalpa
+          token: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
+          path: pvt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pvt/pnpm-lock.yaml
+      - run: npm ci --prefix pvt
+      - name: prewarm WS fleet (108 sockets)
+        run: npx --prefix pvt tsx src/cli/index.ts prewarm --product ${{ matrix.product }} --ws-only
+        env:
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          GEMINI_API_KEY_6: ${{ secrets.GEMINI_API_KEY_6 }}
+          GEMINI_API_KEY_7: ${{ secrets.GEMINI_API_KEY_7 }}
+          GEMINI_API_KEY_8: ${{ secrets.GEMINI_API_KEY_8 }}
+          GEMINI_API_KEY_9: ${{ secrets.GEMINI_API_KEY_9 }}
+          GEMINI_API_KEY_10: ${{ secrets.GEMINI_API_KEY_10 }}
+          GEMINI_API_KEY_11: ${{ secrets.GEMINI_API_KEY_11 }}
+          GEMINI_API_KEY_12: ${{ secrets.GEMINI_API_KEY_12 }}
+          GEMINI_API_KEY_13: ${{ secrets.GEMINI_API_KEY_13 }}
+          GEMINI_API_KEY_14: ${{ secrets.GEMINI_API_KEY_14 }}
+          GEMINI_API_KEY_15: ${{ secrets.GEMINI_API_KEY_15 }}
+          GEMINI_API_KEY_16: ${{ secrets.GEMINI_API_KEY_16 }}
+          GEMINI_API_KEY_17: ${{ secrets.GEMINI_API_KEY_17 }}
+          GEMINI_API_KEY_18: ${{ secrets.GEMINI_API_KEY_18 }}
+          GEMINI_API_KEY_19: ${{ secrets.GEMINI_API_KEY_19 }}
+          GEMINI_API_KEY_20: ${{ secrets.GEMINI_API_KEY_20 }}
+          GEMINI_API_KEY_21: ${{ secrets.GEMINI_API_KEY_21 }}
+          GEMINI_API_KEY_22: ${{ secrets.GEMINI_API_KEY_22 }}
+          GEMINI_API_KEY_23: ${{ secrets.GEMINI_API_KEY_23 }}
+          GEMINI_API_KEY_24: ${{ secrets.GEMINI_API_KEY_24 }}
+          GEMINI_API_KEY_25: ${{ secrets.GEMINI_API_KEY_25 }}
+          GEMINI_API_KEY_26: ${{ secrets.GEMINI_API_KEY_26 }}
+          GEMINI_API_KEY_27: ${{ secrets.GEMINI_API_KEY_27 }}
+      - run: npx --prefix pvt tsx src/cli/index.ts pack --product ${{ matrix.product }}
+      - name: push bundles to app repo + cache Release
+        env:
+          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
+        run: |
+          set -e
+          sha=$(sha256sum pvt/bundles.bin.* pvt/index.db pvt/manifest.json 2>/dev/null | sha256sum | cut -d' ' -f1 || echo new)
+          gh release upload v-cache-latest pvt/cache_${{ matrix.product }}.db.zst --repo MAST3R/kalpa-output --clobber || echo "no cache artifact yet (ok pre-L3)"
+          git clone https://x-access-token:${{ secrets.PVT_CANON_ACCESS_TOKEN }}@github.com/MAST3R/kalpa-${{ matrix.product }}.git out
+          mkdir -p out/assets
+          cp pvt/bundles.bin.* pvt/index.db pvt/manifest.json out/assets/ 2>/dev/null || echo "no bundles yet"
+          cp -r pvt/app/template/* out/app/ 2>/dev/null || mkdir -p out/app && cp -r pvt/src out/app/ 2>/dev/null || true
+          git -C out config user.name "kalpa-bot"
+          git -C out config user.email "bot@kalpa.local"
+          git -C out add -A && git -C out diff --cached --quiet || git -C out commit -m "chore(${{
+            matrix.product }}): bundles $sha"
+          git -C out push || echo "nothing to push yet"
