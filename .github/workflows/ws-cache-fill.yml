@@ -15,9 +15,8 @@ jobs:
   prewarm:
     strategy:
       matrix:
-        product: [atom, scope, tesla]
+        product: ${{ inputs.product == 'all' && fromJSON('["atom", "scope", "tesla"]') || fromJSON(format('["{0}"]', inputs.product)) }}
     runs-on: ubuntu-latest
-    if: ${{ inputs.product == 'all' || inputs.product == matrix.product }}
     steps:
       - uses: actions/checkout@v4
         with:
