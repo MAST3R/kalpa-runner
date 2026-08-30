@@ -92,6 +92,19 @@ jobs:
           mkdir -p pvt/state
           zstd -19 -f pvt/state/cache.db -o pvt/state/cache_${{ inputs.product }}.db.zst || true
           
-          # Upload release asset to MAST3R/kalpa-output
+          # 1. Upload unified release asset to MAST3R/kalpa-output
           gh release upload v-cache-latest pvt/state/cache_${{ inputs.product }}.db.zst --repo MAST3R/kalpa-output --clobber || \
           gh release create v-cache-latest pvt/state/cache_${{ inputs.product }}.db.zst --repo MAST3R/kalpa-output --title "Kalpa Pre-Warmed Cache DB" --notes "Latest pre-warmed cache db" || echo "Release created"
+          
+          # 2. Split into 30MB chunks and push to MAST3R/kalpa-output git repo
+          git clone https://x-access-token:${{ secrets.PVT_CANON_ACCESS_TOKEN }}@github.com/MAST3R/kalpa-output.git out_repo || true
+          if [ -d "out_repo" ]; then
+            mkdir -p out_repo/chunks
+            rm -f out_repo/chunks/cache_${{ inputs.product }}.db.zst.part_*
+            split -b 30M pvt/state/cache_${{ inputs.product }}.db.zst out_repo/chunks/cache_${{ inputs.product }}.db.zst.part_
+            git -C out_repo config user.name "kalpa-bot"
+            git -C out_repo config user.email "bot@kalpa.local"
+            git -C out_repo add -A
+            git -C out_repo diff --cached --quiet || git -C out_repo commit -m "chore(${{ inputs.product }}): update ${{ inputs.level }} 30MB cache chunks"
+            git -C out_repo push origin main || git -C out_repo push origin master || echo "Push completed"
+          fi
