@@ -29,6 +29,9 @@ jobs:
     name: prewarm-fleet (${{ inputs.level }} - ${{ inputs.product }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      issues: write
+      contents: write
 
     steps:
       - name: Checkout Kalpa Engine Repo
@@ -56,6 +59,8 @@ jobs:
           cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ inputs.product }} --level ${{ inputs.level }} --ws-only
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
+          GH_REPO: "MAST3R/kalpa"
           GEMINI_API_KEY_0: ${{ secrets.GEMINI_API_KEY_0 }}
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
