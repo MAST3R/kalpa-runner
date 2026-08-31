@@ -32,6 +32,7 @@ jobs:
     permissions:
       issues: write
       contents: write
+      actions: write
 
     steps:
       - name: Checkout Kalpa Engine Repo
@@ -54,7 +55,21 @@ jobs:
       - name: Install Dependencies
         run: cd pvt && pnpm install --frozen-lockfile
 
-      - name: Prewarm WebSocket Fleet (Fresh Run, 108 Sockets, 63k TPM Clamp)
+      - name: Restore Existing Pre-Warmed Cache DB
+        env:
+          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
+        run: |
+          mkdir -p pvt/state
+          sudo apt-get update && sudo apt-get install -y zstd
+          echo "[RESTORE] Checking for existing pre-warmed cache on MAST3R/kalpa-output..."
+          gh release download v-cache-latest -p 'cache_${{ inputs.product }}.db.zst' --repo MAST3R/kalpa-output --dir /tmp || echo "[RESTORE] No prior release found. Starting fresh."
+          if [ -f "/tmp/cache_${{ inputs.product }}.db.zst" ]; then
+            echo "[RESTORE] Decompressing existing cache DB..."
+            zstd -d "/tmp/cache_${{ inputs.product }}.db.zst" -o pvt/state/cache.db -f
+            ls -lh pvt/state/cache.db
+          fi
+
+      - name: Prewarm WebSocket Fleet (108 Sockets, 63k TPM Clamp)
         run: |
           cd pvt && npx tsx src/cli/index.ts prewarm --product ${{ inputs.product }} --level ${{ inputs.level }} --ws-only
         env:
@@ -128,5 +143,26 @@ jobs:
               git -C out_repo add -A
               git -C out_repo diff --cached --quiet || git -C out_repo commit -m "chore(${{ inputs.product }}): update ${{ inputs.level }} 30MB cache chunks"
               git -C out_repo push origin main || git -C out_repo push origin master || echo "Push completed"
+            fi
+          fi
+
+      - name: Auto-Chain Next Batch If Incomplete
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
+        run: |
+          if [ -f "pvt/state/cache.db" ]; then
+            TOTAL_VERIFIED=$(cd pvt && node -e '
+              const Database = require("better-sqlite3");
+              const db = new Database("state/cache.db", { readonly: true });
+              const row = db.prepare("SELECT COUNT(DISTINCT concept_id) as cnt FROM asset_cache WHERE tv_status = \"verified\"").get();
+              console.log(row ? row.cnt : 0);
+            ' || echo "0")
+            echo "Current Verified Concepts in Cache: $TOTAL_VERIFIED"
+            
+            # If level is L4 (6,812 target) and we have not finished, auto-chain next run!
+            if [ "${{ inputs.level }}" = "L4" ] && [ "$TOTAL_VERIFIED" -lt 6800 ]; then
+              echo "[AUTO-CHAIN] Job finished or timed out with $TOTAL_VERIFIED / 6812 concepts. Dispatching next workflow run..."
+              gh workflow run ws-cache-fill.yml --repo MAST3R/kalpa-runner -f product=${{ inputs.product }} -f level=${{ inputs.level }}
             fi
           fi
