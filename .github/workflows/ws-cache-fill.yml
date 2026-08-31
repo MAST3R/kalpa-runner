@@ -89,6 +89,14 @@ jobs:
         run: |
           cd pvt && KALPA_CACHE_DB=state/cache.db npx tsx scripts/validate-cache.ts --level ${{ inputs.level }}
 
+      - name: Upload Cache DB Artifact (Always Safe)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalpa-cache-db-${{ inputs.level }}
+          path: pvt/state/cache*.db*
+          if-no-files-found: ignore
+
       - name: Compress and Sync Cache Asset
         env:
           GH_TOKEN: ${{ secrets.PVT_CANON_ACCESS_TOKEN }}
